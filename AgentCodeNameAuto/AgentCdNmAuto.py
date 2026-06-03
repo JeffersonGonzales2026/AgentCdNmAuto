@@ -1,5 +1,6 @@
 import io
 import re
+from collections import OrderedDict
 
 import pandas as pd
 import pdfplumber
@@ -139,6 +140,42 @@ def parse_pdf_entries(pdf_file):
     return entries
 
 
+def group_entries_by_section_and_agent(entries, account_agent_map):
+    grouped = OrderedDict()
+
+    for entry in entries:
+        section = entry["details"] or "No Section"
+        account = entry["account"]
+        agent_info = account_agent_map.get(account, {})
+        agent_name = agent_info.get("agent_name") or "Unknown"
+
+        if section not in grouped:
+            grouped[section] = OrderedDict()
+        if agent_name not in grouped[section]:
+            grouped[section][agent_name] = []
+
+        grouped[section][agent_name].append(account)
+
+    return grouped
+
+
+def format_grouped_output(grouped):
+    sections = []
+    section_items = list(grouped.items())
+    for index, (section, agents) in enumerate(section_items):
+        lines = [f"### {section}"]
+        for agent_name, accounts in agents.items():
+            lines.append(f"@{agent_name}")
+            lines.extend(f"- {account}" for account in accounts)
+            lines.append("")
+
+        if index < len(section_items) - 1:
+            lines.append("---")
+        sections.append("\n".join(lines).rstrip())
+
+    return "\n\n".join(sections)
+
+
 def build_result_pdf(entries, account_agent_map):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -206,6 +243,9 @@ def main():
                 st.warning("No account numbers were found in the uploaded PDF. Please verify the PDF content.")
                 return
 
+            grouped = group_entries_by_section_and_agent(entries, account_agent_map)
+            grouped_output = format_grouped_output(grouped)
+
             result_pdf = build_result_pdf(entries, account_agent_map)
 
             st.success("Result PDF generated successfully.")
@@ -215,6 +255,15 @@ def main():
                 file_name="agent_error_report.pdf",
                 mime="application/pdf",
             )
+            st.download_button(
+                label="Download Grouped Output",
+                data=grouped_output,
+                file_name="grouped_output.txt",
+                mime="text/plain",
+            )
+
+            st.write("### Reorganized grouping output")
+            st.code(grouped_output, language="markdown")
 
             sample_table = [
                 {
